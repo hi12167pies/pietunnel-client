@@ -9,7 +9,7 @@ CLI.get = function(x) {
 // Do not edit this
 const config = {
   version: "1.0.0-beta",
-  socket: ['http://127.0.0.1/', '/__pies.cf/websocket/public/tunnel/'],
+  socket: ['https://pies.cf/', '/__pies.cf/websocket/public/tunnel/'],
 }
 const fs = require('fs/promises')
 const { version } = config
