@@ -8,8 +8,8 @@
 
 # Q&A
 
-> **Q:** Can I forward requests to a non-local url (eg. google.com)
+> **Q:** Can I forward requests to a non-local url (eg. google.com)\
 **A:** Yes but we do not recommend this as it is not useful in anyway.
 
-> **Q:** Do I need as HTTP Server to share local files?
+> **Q:** Do I need as HTTP Server to share local files?\
 **A:** Yes you can use [XAMPP](https://www.apachefriends.org/download.html) or any http server software
