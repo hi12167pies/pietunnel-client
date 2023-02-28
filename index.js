@@ -1,140 +1,81 @@
-const CLI = {}
-CLI.get = function(x) {
-  const index = process.argv.indexOf("--" + x)
-  if (index == -1) return null
-  const value = process.argv[index + 1]
-  if (value == undefined) return null
-  return value
-}
-// Do not edit this
-const config = {
-  version: "1.0.0-beta",
-  socket: ['https://pies.cf/', '/__pies.cf/websocket/public/tunnel/'],
-}
+const config = require("./config")
+
 const fs = require('fs/promises')
-const { version } = config
+const fs1 = require('fs')
 const path = require("path")
 const io = require("socket.io-client")
-const axios = require("axios").default
 const url = require("url")
+const Logger = require("./logger")
+const CLI = require("./cli")
+const requestForwarder = require("./requestForwarder")
 
-main()
+let localURL
+
+if (CLI.getValue("setting") != undefined) {
+  config.socket.setting = CLI.getValue("setting")
+}
 
 async function main() {
-
-  // Log init
-  console.log("-----------")
-  console.log(`PieTunnel (v${version})`)
-  console.log("-----------")
-  console.log("")
-
-  let token = null
-
+  // Read token
   try {
-    // Get token from the token file
-    const tokenFile = await fs.readFile(path.join(process.cwd(), "token.txt"), 'ascii')
-    token = tokenFile.slice(tokenFile.indexOf("token=") + "token=".length)
+    if (fs1.existsSync(path.join(process.cwd(), "pietunnel_token.txt"))) {
+      const token = await fs.readFile(path.join(process.cwd(), "pietunnel_token.txt"), 'utf-8')
+      if (token == "") {
+        Logger.red("Invalid token.")
+        return
+      }
+      // Check LocalURL
+      const u = CLI.getValue("local-url")
+      if (u == undefined) {
+        Logger.red("LocalURL not defined. Please define a URL to proxy this request to. Example: ... --local-url http://localhost:3000")
+        return
+      }
+      localURL = url.parse(u)
+      Logger.log("LocalURL: " + localURL.href)
+      createSocket(token)
+    } else {
+      Logger.log("Please put your authentication token in pietunnel_token.txt, get authentication token at https://pies.cf/panel/tunnels")
+      fs.writeFile(path.join(process.cwd(), "pietunnel_token.txt"), "")
+      return
+    }
   } catch (e) {
-    // If error re-write the file
-    console.log(`Error reading token.txt, ${e.message}`)
-    console.log(`Writing new default file.`)
-    await fs.writeFile(path.join(process.cwd(), "token.txt"), "token=")
-    process.exit()
-  }
-
-  // Get the forwarded server
-  const localURL = CLI.get("local-url")
-
-  if (localURL == null) {
-    console.log("No local url provided. Usage / Example: ... --local-url http://127.0.0.1")
+    Logger.error("Failed to read token file. Message: " + e.message)
     return
   }
+}
 
-  console.log(`Local URL: ${localURL}`)
-  console.log("")
-
-  console.log(`Connecting to socket...`)
-
-  const socket = io(config.socket[0], {
-    path: config.socket[1]
+function createSocket(token) {
+  // Create socket
+  const socketSetting = config.socket[config.socket.setting]
+  const socket = io(socketSetting.host, {
+    path: socketSetting.path
   })
 
-  let state = false
-
-  // auth user
+  // Once connected send token
   socket.on("connect", () => {
-    console.log(`connected, sending auth token`)
-    socket.emit("auth_token", token)
+    socket.emit("auth_token", [ token, config.protocal ])
   })
 
-  socket.on("connect_error", (err) => {
-    console.log(`Failed to connect ${err}`)
+  // Check accepted
+  socket.on("auth_accept", (data) => {
+    Logger.green("Tunnel accepted.")
+    Logger.green("=> Protocal: " + data[1])
+    Logger.green("=> Address: " + data[0])
+    Logger.green("=> Forwarding to: " + localURL.href)
   })
 
-  socket.on("disconnect", () => {
-    console.log(`disconnected`)
-  })
-
-  // handle auth reject / accept stages
-
-  socket.on("auth_reject", (r) => {
-    console.log("")
-    console.log(`Auth rejected. Reason: ${r}`)
+  // Check rejected
+  socket.on("auth_reject", (data) => {
+    Logger.red("Tunnel authentication rejected.")
+    Logger.red("=> Reason: " + data)
     process.exit()
   })
 
-  socket.on("auth_accept", (url) => {
-    state = true
-    console.log(`Auth accepted. Your tunnel is live on ${url}`)
+  socket.on("message", (message) => {
+    Logger.log(`(Message) ${message}`)
   })
 
-
-  // handle incoming requests
-  socket.on("web-request", async (data) => {
-    const id = data.id
-
-    let time = Date.now()
-    let headers = data.headers
-    headers['host'] = url.parse(localURL).host
-    try {
-      // request localurl
-      const opts = {
-        baseURL: localURL + data.url,
-        method: data.method,
-        headers,
-        responseType: 'arraybuffer',
-      }
-      if (data.body) opts.data = data.body
-      const response = await axios(opts)
-      // end
-      end(response)
-    } catch (e) {
-      // if 404 it will throw error, so end if there is a response
-      if (e.response) return end(e.response)
-      // if error log
-      console.log(e)
-    }
-
-    // function to end response
-    function end(response) {
-      // send response
-      socket.emit("web-response", {
-        id,
-        headers: response.headers,
-        data: Buffer.from(response.data).toString("base64"),
-        status: response.status
-      })
-      // log out response
-      console.log(`[Forwarded Response] ${data.method} ${data.url} ${response.status} ${Date.now() - time}ms ID: ${short(id, 10)}`)
-    }
-  })
+  requestForwarder(socket, localURL)
 }
 
-function short(string, to) {
-  let newStr = string.slice(0, to)
-  let l = string.length - newStr.length
-  if (l > 0) {
-    newStr += ` (+${l} more)`
-  }
-  return newStr
-}
+main()
